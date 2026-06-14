@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <meta name="theme-color" content="#1a1a2e">
 <title>Fruit Merge</title>
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href='data:application/json,{"name":"Fruit Merge","short_name":"Fruit","start_url":"./","display":"standalone","background_color":"#1a1a2e","theme_color":"#1a1a2e","icons":[{"src":"icon-192.png","sizes":"192x192","type":"image/png"},{"src":"icon-512.png","sizes":"512x512","type":"image/png"}]}'>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee;
@@ -37,7 +37,6 @@
 <script>
 const { Engine, Render, Runner, Bodies, Body, Composite, Events } = Matter;
 
-// Fruit tiers: radius, color, points
 const FRUITS = [
   { r: 14, color: '#ff6b9d', pts: 1 },
   { r: 19, color: '#ff8c42', pts: 3 },
@@ -52,7 +51,7 @@ const FRUITS = [
 const W = Math.min(window.innerWidth - 20, 400);
 const H = Math.min(window.innerHeight - 80, 600);
 const DROP_LINE = 80;
-const GAMEOVER_LINE = 60;
+const GAMEOVER_LINE = 100;
 
 const canvas = document.getElementById('game');
 canvas.width = W;
@@ -60,19 +59,17 @@ canvas.height = H;
 const ctx = canvas.getContext('2d');
 
 let engine, world, score = 0, nextTier = 0, dropX = W/2, canDrop = true, gameOver = false;
-let previewFruit = null;
 
 function init() {
   engine = Engine.create();
   engine.gravity.y = 1.2;
   world = engine.world;
 
-  // Walls
-  const wallOpts = { isStatic: true, render: { fillStyle: '#0f3460' } };
+  const wallOpts = { isStatic: true };
   Composite.add(world, [
-    Bodies.rectangle(W/2, H+10, W, 20, wallOpts),       // floor
-    Bodies.rectangle(-10, H/2, 20, H, wallOpts),         // left
-    Bodies.rectangle(W+10, H/2, 20, H, wallOpts),        // right
+    Bodies.rectangle(W/2, H+10, W, 20, wallOpts),
+    Bodies.rectangle(-10, H/2, 20, H, wallOpts),
+    Bodies.rectangle(W+10, H/2, 20, H, wallOpts),
   ]);
 
   Events.on(engine, 'collisionStart', handleCollision);
@@ -86,29 +83,30 @@ function handleCollision(evt) {
     const a = pair.bodyA, b = pair.bodyB;
     if (a.tier !== undefined && a.tier === b.tier && !a.merged && !b.merged) {
       const tier = a.tier;
-      if (tier >= FRUITS.length - 1) continue; // max fruit
+      if (tier >= FRUITS.length - 1) continue;
       a.merged = b.merged = true;
       const x = (a.position.x + b.position.x) / 2;
       const y = (a.position.y + b.position.y) / 2;
       Composite.remove(world, a);
       Composite.remove(world, b);
-      spawnFruit(x, y, tier + 1, false);
+      const merged = spawnFruit(x, y, tier + 1);
+      merged.inPlay = true;
       score += FRUITS[tier + 1].pts;
       document.getElementById('score').textContent = 'Score: ' + score;
     }
   }
 }
 
-function spawnFruit(x, y, tier, isDrop = true) {
+function spawnFruit(x, y, tier) {
   const f = FRUITS[tier];
   const body = Bodies.circle(x, y, f.r, {
     restitution: 0.2,
     friction: 0.5,
     density: 0.001,
-    render: { fillStyle: f.color }
   });
   body.tier = tier;
   body.merged = false;
+  body.inPlay = false;
   Composite.add(world, body);
   return body;
 }
@@ -117,7 +115,6 @@ function loop() {
   ctx.fillStyle = '#16213e';
   ctx.fillRect(0, 0, W, H);
 
-  // Danger line
   ctx.strokeStyle = 'rgba(233, 69, 96, 0.3)';
   ctx.setLineDash([5, 5]);
   ctx.beginPath();
@@ -126,7 +123,6 @@ function loop() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Draw bodies
   const bodies = Composite.allBodies(world);
   for (const b of bodies) {
     if (b.tier === undefined) continue;
@@ -138,7 +134,6 @@ function loop() {
     ctx.stroke();
   }
 
-  // Preview
   if (canDrop && !gameOver) {
     const f = FRUITS[nextTier];
     ctx.globalAlpha = 0.5;
@@ -156,10 +151,13 @@ function loop() {
     ctx.setLineDash([]);
   }
 
-  // Check game over
   if (!gameOver) {
     for (const b of bodies) {
-      if (b.tier !== undefined && b.position.y - b.circleRadius < GAMEOVER_LINE
+      if (b.tier === undefined) continue;
+      if (!b.inPlay && b.position.y - b.circleRadius > GAMEOVER_LINE) {
+        b.inPlay = true;
+      }
+      if (b.inPlay && b.position.y - b.circleRadius < GAMEOVER_LINE
           && Math.abs(b.velocity.y) < 0.5) {
         endGame();
         break;
@@ -188,7 +186,6 @@ function endGame() {
 
 function restart() {
   Composite.clear(world, false, true);
-  // Re-add walls
   const wallOpts = { isStatic: true };
   Composite.add(world, [
     Bodies.rectangle(W/2, H+10, W, 20, wallOpts),
@@ -202,7 +199,6 @@ function restart() {
   document.getElementById('gameover').classList.remove('show');
 }
 
-// Touch / mouse input
 function getX(e) {
   const rect = canvas.getBoundingClientRect();
   const clientX = e.touches ? e.touches[0].clientX : e.clientX;
