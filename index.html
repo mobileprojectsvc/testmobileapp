@@ -2,22 +2,223 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <meta name="theme-color" content="#1a1a2e">
-<title>Hello World PWA</title>
+<title>Fruit Merge</title>
 <link rel="manifest" href="manifest.json">
 <style>
-  body { font-family: system-ui, sans-serif; display: grid; place-items: center;
-         min-height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }
-  h1 { font-size: 2.5rem; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee;
+         display: flex; flex-direction: column; align-items: center;
+         min-height: 100vh; overflow: hidden; touch-action: none; }
+  #score { padding: 10px; font-size: 1.4rem; font-weight: bold; }
+  #game { background: #16213e; border: 3px solid #0f3460; border-radius: 8px;
+          touch-action: none; display: block; }
+  #gameover { position: fixed; inset: 0; background: rgba(0,0,0,0.85);
+              display: none; place-items: center; flex-direction: column;
+              color: #eee; text-align: center; padding: 20px; }
+  #gameover.show { display: flex; }
+  #gameover h2 { font-size: 2rem; margin-bottom: 10px; }
+  #gameover button { margin-top: 20px; padding: 12px 24px; font-size: 1rem;
+                     background: #e94560; color: white; border: none;
+                     border-radius: 6px; cursor: pointer; }
 </style>
 </head>
 <body>
-  <h1>Hello, World 👋</h1>
+  <div id="score">Score: 0</div>
+  <canvas id="game"></canvas>
+  <div id="gameover">
+    <h2>Game Over!</h2>
+    <p id="finalScore"></p>
+    <button onclick="restart()">Play Again</button>
+  </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
 <script>
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js');
+const { Engine, Render, Runner, Bodies, Body, Composite, Events } = Matter;
+
+// Fruit tiers: radius, color, points
+const FRUITS = [
+  { r: 14, color: '#ff6b9d', pts: 1 },
+  { r: 19, color: '#ff8c42', pts: 3 },
+  { r: 25, color: '#ffd93d', pts: 6 },
+  { r: 32, color: '#6bcf7f', pts: 10 },
+  { r: 40, color: '#4d96ff', pts: 15 },
+  { r: 50, color: '#9b72cf', pts: 21 },
+  { r: 62, color: '#e94560', pts: 28 },
+  { r: 75, color: '#f8b500', pts: 36 },
+];
+
+const W = Math.min(window.innerWidth - 20, 400);
+const H = Math.min(window.innerHeight - 80, 600);
+const DROP_LINE = 80;
+const GAMEOVER_LINE = 60;
+
+const canvas = document.getElementById('game');
+canvas.width = W;
+canvas.height = H;
+const ctx = canvas.getContext('2d');
+
+let engine, world, score = 0, nextTier = 0, dropX = W/2, canDrop = true, gameOver = false;
+let previewFruit = null;
+
+function init() {
+  engine = Engine.create();
+  engine.gravity.y = 1.2;
+  world = engine.world;
+
+  // Walls
+  const wallOpts = { isStatic: true, render: { fillStyle: '#0f3460' } };
+  Composite.add(world, [
+    Bodies.rectangle(W/2, H+10, W, 20, wallOpts),       // floor
+    Bodies.rectangle(-10, H/2, 20, H, wallOpts),         // left
+    Bodies.rectangle(W+10, H/2, 20, H, wallOpts),        // right
+  ]);
+
+  Events.on(engine, 'collisionStart', handleCollision);
+  Runner.run(Runner.create(), engine);
+  nextTier = Math.floor(Math.random() * 4);
+  loop();
+}
+
+function handleCollision(evt) {
+  for (const pair of evt.pairs) {
+    const a = pair.bodyA, b = pair.bodyB;
+    if (a.tier !== undefined && a.tier === b.tier && !a.merged && !b.merged) {
+      const tier = a.tier;
+      if (tier >= FRUITS.length - 1) continue; // max fruit
+      a.merged = b.merged = true;
+      const x = (a.position.x + b.position.x) / 2;
+      const y = (a.position.y + b.position.y) / 2;
+      Composite.remove(world, a);
+      Composite.remove(world, b);
+      spawnFruit(x, y, tier + 1, false);
+      score += FRUITS[tier + 1].pts;
+      document.getElementById('score').textContent = 'Score: ' + score;
+    }
   }
+}
+
+function spawnFruit(x, y, tier, isDrop = true) {
+  const f = FRUITS[tier];
+  const body = Bodies.circle(x, y, f.r, {
+    restitution: 0.2,
+    friction: 0.5,
+    density: 0.001,
+    render: { fillStyle: f.color }
+  });
+  body.tier = tier;
+  body.merged = false;
+  Composite.add(world, body);
+  return body;
+}
+
+function loop() {
+  ctx.fillStyle = '#16213e';
+  ctx.fillRect(0, 0, W, H);
+
+  // Danger line
+  ctx.strokeStyle = 'rgba(233, 69, 96, 0.3)';
+  ctx.setLineDash([5, 5]);
+  ctx.beginPath();
+  ctx.moveTo(0, GAMEOVER_LINE);
+  ctx.lineTo(W, GAMEOVER_LINE);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw bodies
+  const bodies = Composite.allBodies(world);
+  for (const b of bodies) {
+    if (b.tier === undefined) continue;
+    ctx.fillStyle = FRUITS[b.tier].color;
+    ctx.beginPath();
+    ctx.arc(b.position.x, b.position.y, b.circleRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.stroke();
+  }
+
+  // Preview
+  if (canDrop && !gameOver) {
+    const f = FRUITS[nextTier];
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = f.color;
+    ctx.beginPath();
+    ctx.arc(dropX, DROP_LINE - f.r - 10, f.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.beginPath();
+    ctx.moveTo(dropX, DROP_LINE);
+    ctx.lineTo(dropX, H - 20);
+    ctx.setLineDash([3, 6]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Check game over
+  if (!gameOver) {
+    for (const b of bodies) {
+      if (b.tier !== undefined && b.position.y - b.circleRadius < GAMEOVER_LINE
+          && Math.abs(b.velocity.y) < 0.5) {
+        endGame();
+        break;
+      }
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+function drop() {
+  if (!canDrop || gameOver) return;
+  const f = FRUITS[nextTier];
+  const clampedX = Math.max(f.r + 5, Math.min(W - f.r - 5, dropX));
+  spawnFruit(clampedX, DROP_LINE - f.r - 10, nextTier);
+  canDrop = false;
+  nextTier = Math.floor(Math.random() * 4);
+  setTimeout(() => canDrop = true, 500);
+}
+
+function endGame() {
+  gameOver = true;
+  document.getElementById('finalScore').textContent = 'Final Score: ' + score;
+  document.getElementById('gameover').classList.add('show');
+}
+
+function restart() {
+  Composite.clear(world, false, true);
+  // Re-add walls
+  const wallOpts = { isStatic: true };
+  Composite.add(world, [
+    Bodies.rectangle(W/2, H+10, W, 20, wallOpts),
+    Bodies.rectangle(-10, H/2, 20, H, wallOpts),
+    Bodies.rectangle(W+10, H/2, 20, H, wallOpts),
+  ]);
+  score = 0;
+  gameOver = false;
+  canDrop = true;
+  document.getElementById('score').textContent = 'Score: 0';
+  document.getElementById('gameover').classList.remove('show');
+}
+
+// Touch / mouse input
+function getX(e) {
+  const rect = canvas.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  return clientX - rect.left;
+}
+canvas.addEventListener('touchmove', e => { e.preventDefault(); dropX = getX(e); }, { passive: false });
+canvas.addEventListener('touchstart', e => { e.preventDefault(); dropX = getX(e); }, { passive: false });
+canvas.addEventListener('touchend', e => { e.preventDefault(); drop(); }, { passive: false });
+canvas.addEventListener('mousemove', e => dropX = getX(e));
+canvas.addEventListener('click', drop);
+
+init();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js');
+}
 </script>
 </body>
 </html>
