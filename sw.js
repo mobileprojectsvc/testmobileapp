@@ -1,18 +1,23 @@
-const CACHE = 'fruit-v2';
-const ASSETS = ['./', './index.html', './manifest.json',
-                'https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js'];
+const CACHE = 'app-v1';
 
 self.addEventListener('install', e => {
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
 });
 
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-  ));
+  e.waitUntil(clients.claim());
 });
 
 self.addEventListener('fetch', e => {
-  e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  if (e.request.method !== 'GET') return;
+  e.respondWith(
+    caches.open(CACHE).then(cache =>
+      fetch(e.request)
+        .then(resp => {
+          if (resp.ok) cache.put(e.request, resp.clone());
+          return resp;
+        })
+        .catch(() => cache.match(e.request))
+    )
+  );
 });
